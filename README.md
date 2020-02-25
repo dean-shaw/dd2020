@@ -47,7 +47,7 @@ Questions
 
 
 More questions
-1. Instead of strictly cutting off top 25 for each domain, pages tied for last place will be returned regardless of overrun. For example, if 3 pages are tied for 24th place, all 3 will be returned (thus top 26). Is this okay?
+1. Instead of strictly cutting off top 25 for each domain, pages tied for last place will be returned regardless of overrun. For example, if 3 pages are tied for 24th place, all 3 will be returned (thus 26 results). Is this okay?
 
 2. I'm noticing that the page titles in the blacklist have different encodings than the page titles from the raw pageviews file.
 

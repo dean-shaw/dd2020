@@ -6,8 +6,14 @@ from operator import add
 from pyspark.sql import SparkSession, Window
 from pyspark.sql.functions import udf, concat_ws, stddev_pop, avg, rank, col
 from pyspark.sql.types import IntegerType, StringType, StructType, StructField
-from datetime import datetime
+from datetime import datetime, timedelta
 import urllib.parse
+
+HOUR = timedelta(hours=3600)
+TOP_N = 25
+
+# source data
+src_url = "https://dumps.wikimedia.org/other/pageviews/{year}/{year}-{month}/pageviews-{year}{month}{day}-{hour}0000.gz"
 
 # pageview columns and schema
 domain_code = "domain_code"
@@ -29,8 +35,11 @@ blacklist_schema = StructType([
 	StructField(encoded_page_title, StringType())
 	])
 
+# udfs
 decode_udf = udf(lambda pt: urllib.parse.unquote(pt))
 encode_udf = udf(lambda pt: urllib.parse.quote(pt))
+
+
 
 # raw columns
 pudt = 'tpep_pickup_datetime'
@@ -131,7 +140,7 @@ def window_and_sort(df, n):
 	return ranked
 
 
-def run_batch(s3_input_file, elasticache_output_location):
+def run_batch_old(s3_input_file, elasticache_output_location):
 	"""
 	yellowcab taxi data is approximately 630 mb per file
 	fhv high volume data is approximately 1.2 gb per file
@@ -159,15 +168,59 @@ def run_batch(s3_input_file, elasticache_output_location):
 	return
 
 
+def validate_input(start, end):
+	fmt = '%Y%m%d%H'
+	sdt = datetime.strptime(start, fmt)
+	edt = datetime.strptime(end, fmt)
+	if sdt > edt:
+		raise Exception("start must be before end")
+	return sdt, edt
+
+def check_cache(dt):
+	return False
+
+def download_and_gunzip(dt):
+	pass
+
+def sink_data(tranformed):
+	pass
+
+def run_batch(start, end):
+	"""
+	for each date-hour
+		if date-hour not in outputs folder
+			download source datea
+			gunzip
+			transform
+			write to outputs folder
+	"""
+	sdt, edt = validate_input(start, end)
+	bl = self.spark.read.csv("blacklist", schema=blacklist_schema, sep=" ")
+	while sdt <= edt:
+		if not check_cache(sdt):
+			source_data = download_and_gunzip(sdt)
+			pv = self.spark.read.csv(source_data, schema=schema, sep = " ")
+			clean_pv = clean_pageview(pv)
+
+			bl_removed = remove_blacklist(clean_pv, bl)
+
+			transformed = window_and_sort(bl_removed, TOP_N)
+			sink_data(transformed)
+		else:
+			print(f"{sdt} already processed, skipping...")
+		sdt += HOUR
+	print("all done.")
+
 def main():
 	print("############################")
 	print("Welcome to DD2020 Wikipedia Aggregator")
 	print("You are using python version {}".format(platform.python_version()))
 	print("############################")
 	parser = argparse.ArgumentParser(description="Taxi Cost and Time Aggregator")
-	parser.add_argument('--infile', dest="infile", help="input file", type=str, required=True, default=None)
+	parser.add_argument('--start', dest="start", help="start date and hour in YYYYMMDDHH format", type=str, required=True)
+	parser.add_argument('--end', dest="end", help="end date and hour in YYYYMMDDHH format", type=str, required=True)
 	args = parser.parse_args()
-	run_batch(args.infile, 'bogus')
+	run_batch(args.start, args.end)
 
 
 class PySparkTest(unittest.TestCase):
@@ -222,8 +275,11 @@ class WikiAggregatorTest(PySparkTest):
 		bl_removed_count = bl_removed.count()
 		print(f"count bl removed {bl_removed_count}")
 
-		# transformed = window_and_sort(pv, 3)
-		# transformed.show(n=21)
+		transformed = window_and_sort(bl_removed, 3)
+		transformed.show(n=21)
+		transformed_count = transformed.count()
+		print(f"count transformed {transformed_count}")
+
 	"""
 	def test_aggregate_cost(self):
 		fhv = self.spark.read.csv("yellow_tripdata_sample.csv", header=True)
