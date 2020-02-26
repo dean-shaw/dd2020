@@ -8,12 +8,18 @@ from pyspark.sql.functions import udf, concat_ws, stddev_pop, avg, rank, col
 from pyspark.sql.types import IntegerType, StringType, StructType, StructField
 from datetime import datetime, timedelta
 import urllib.parse
+from gzip import decompress
+from requests import get
 
 HOUR = timedelta(hours=3600)
 TOP_N = 25
 
 # source data
 src_url = "https://dumps.wikimedia.org/other/pageviews/{year}/{year}-{month}/pageviews-{year}{month}{day}-{hour}0000.gz"
+
+# filenames
+in_raw = "pageviews-{year}{month}{day}-{hour}.csv"
+out_processed = "top{n}-{year}{month}{day}-{hour}.csv"
 
 # pageview columns and schema
 domain_code = "domain_code"
@@ -55,6 +61,9 @@ month_year = 'month_year'
 duration = 'duration'
 key_pair = 'key_pair'
 
+def lpad(i):
+	s = "0" + str(i)
+	return s[-2:]
 
 def calc_duration(dtstr1, dtstr2):
 	"""
@@ -123,18 +132,19 @@ def transform_and_aggregate(df):
 	return aggdf
 
 def clean_pageview(pv):
+	print("cleaning pageview")
 	return pv.withColumn(encoded_page_title, encode_udf(page_title))
 
 def clean_blacklist(bl):
 	return bl.withColumn(page_title, decode_udf(encoded_page_title))
 
 def remove_blacklist(df, bl):
-	# joined = df.join(bl, [domain_code, page_title], 'left_outer')
-	# joined.show(n=20)
+	print("removing blacklist")
 	joined = df.join(bl, [domain_code, encoded_page_title], 'left_anti')
 	return joined
 
 def window_and_sort(df, n):
+	print("windowing and sorting")
 	window = Window.partitionBy(df[domain_code]).orderBy(df[count_views].desc())
 	ranked = df.withColumn("rank", rank().over(window)).filter(col('rank') <= n)
 	return ranked
@@ -176,14 +186,17 @@ def validate_input(start, end):
 		raise Exception("start must be before end")
 	return sdt, edt
 
-def check_cache(dt):
+def check_cache(year, month, day, hour):
 	return False
 
-def download_and_gunzip(dt):
-	pass
-
-def sink_data(tranformed):
-	pass
+def download_and_gunzip(year, month, day, hour):
+	full_url = src_url.format(year=year, month=month, day=day, hour=hour)
+	print(f"downloading from {full_url}")
+	download_location = in_raw.format(year=year, month=month, day=day, hour=hour)
+	with open(download_location, 'wb') as f:
+		f.write(decompress(get(full_url).content))
+	print(f"done writing to {download_location}")
+	return download_location
 
 def run_batch(start, end):
 	"""
@@ -195,17 +208,24 @@ def run_batch(start, end):
 			write to outputs folder
 	"""
 	sdt, edt = validate_input(start, end)
-	bl = self.spark.read.csv("blacklist", schema=blacklist_schema, sep=" ")
+	spark = SparkSession.builder.appName("WikiAggregator").getOrCreate()
+	bl = spark.read.csv("blacklist", schema=blacklist_schema, sep=" ")
 	while sdt <= edt:
-		if not check_cache(sdt):
-			source_data = download_and_gunzip(sdt)
-			pv = self.spark.read.csv(source_data, schema=schema, sep = " ")
+		month = lpad(sdt.month)
+		day = lpad(sdt.day)
+		hour = lpad(sdt.hour)
+		if not check_cache(sdt.year, month, day, hour):
+			source_data = download_and_gunzip(sdt.year, month, day, hour)
+			pv = spark.read.csv(source_data, schema=schema, sep = " ")
+			
 			clean_pv = clean_pageview(pv)
-
 			bl_removed = remove_blacklist(clean_pv, bl)
-
 			transformed = window_and_sort(bl_removed, TOP_N)
-			sink_data(transformed)
+			sort_by_domain_and_rank = transformed.orderBy(domain_code, "rank")
+
+			write_location = out_processed.format(n=TOP_N, year=sdt.year, month=month, day=day, hour=hour)
+			print(f"sinking to {write_location}")
+			sort_by_domain_and_rank.coalesce(1).write.csv(write_location, header=True)
 		else:
 			print(f"{sdt} already processed, skipping...")
 		sdt += HOUR
