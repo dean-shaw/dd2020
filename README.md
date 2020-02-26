@@ -30,8 +30,8 @@ filename format is pageviews-YYYYMMDD-HH0000.gz
 pageviews data format is <domain code> <page title> <count views> <total response size>
 blacklist data format is <domain code> <page title>
 
-Questions
-
+Question
+s
 1. Which sub-domains are there? Bullet point 3 says to aggregate to "unique domain". Is "unique domain" the same as "sub domain"? Are both of these equal to the first column of the pageviews file? If that is the case, then are we simply aggregating by the first column and returning the top 25 pages per domain code?
 2. We only look at the pageview files, not the projectview files right
 3. Do we include mobile as the same domain code? 
@@ -65,3 +65,30 @@ Should I be decoding the blacklist file before removing equivalent page titles? 
 
 [Assumptions]
 1. We are treating mobile and web as separate domains. For example the web version of english page for Tokyo, "en Tokyo", will be treated separately from the mobile version of the same page, "en.m Tokyo".
+
+2. Instead of strictly cutting off top 25 for each domain, pages tied for last place will be returned regardless of overrun. For example, if 3 pages are tied for 24th place, all 3 will be returned (thus 26 results).
+
+3. Page titles in the blacklist have different encodings than the page titles from the raw pageviews file.
+
+for example:
+The german page for Centipede appears as "de Hundertfüßer 2 0" in the pageviews file and "de Hundertf%C3%BC%C3%9Fer" in the blacklist file. 
+
+I fixed this case with a simple url decoding. However, there are cases where straight url decoding will not yield the equivalent value. 
+
+For example, the german page for Hitzacker appears as "de Hitzacker_(Elbe) 1 0" in the pageviews file and "de Hitzacker%20(Elbe)" in the blacklist file. Normally %20 decodes to the empty space character " " instead of underscore.
+
+I treat this as a bug in the blacklist, therefore Hitzacker will not be filtered out.
+
+[Installation]
+1. Create a new python environment (via conda for example) and install the packages in requirements.txt
+
+[Running Tests]
+1. run unit tests by "python -m unittest WikiAggregator"
+
+[Running Program]
+1. run program by "python WikiAggregator.py --start <start timestamp> --end <end timestamp>"
+	where timestamps are in the format YYYYMMDDHH
+	start and end timestamps are inclusive
+2. each run will produce two local artifacts,
+	the raw csv downloaded from the data repo at pageviews-YYYYMMDD-HH.csv,
+	the computed results at top25-YYYYMMDD-HH.csv

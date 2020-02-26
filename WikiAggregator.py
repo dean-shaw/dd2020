@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import urllib.parse
 from gzip import decompress
 from requests import get
+from os import path
 
 HOUR = timedelta(hours=3600)
 TOP_N = 25
@@ -187,7 +188,10 @@ def validate_input(start, end):
 	return sdt, edt
 
 def check_cache(year, month, day, hour):
-	return False
+	"""
+	return True if results for this timestamp have already been computed
+	"""
+	return path.exists(out_processed.format(n=TOP_N, year=year, month=month, day=day, hour=hour))
 
 def download_and_gunzip(year, month, day, hour):
 	full_url = src_url.format(year=year, month=month, day=day, hour=hour)
@@ -217,7 +221,7 @@ def run_batch(start, end):
 		if not check_cache(sdt.year, month, day, hour):
 			source_data = download_and_gunzip(sdt.year, month, day, hour)
 			pv = spark.read.csv(source_data, schema=schema, sep = " ")
-			
+
 			clean_pv = clean_pageview(pv)
 			bl_removed = remove_blacklist(clean_pv, bl)
 			transformed = window_and_sort(bl_removed, TOP_N)
