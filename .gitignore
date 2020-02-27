@@ -1,2 +1,7 @@
 
 *.pyc
+.idea/workspace.xml
+.idea/dd2020.iml
+.idea/misc.xml
+.idea/modules.xml
+.idea/vcs.xml
